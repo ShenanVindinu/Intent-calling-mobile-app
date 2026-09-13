@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">ShenanApp</string>
+    <string name="share_text_hint">Write a message</string>
+    <string name="attach_image">Attach image from gallery</string>
+    <string name="share_text_image">Share Text &amp; Image</string>
+    <string name="share">Share</string>
+    <string name="cancel">Cancel</string>
+    <string name="share_via">Share via</string>
+    <string name="selected_contact">%1$s\n%2$s</string>
 </resources>

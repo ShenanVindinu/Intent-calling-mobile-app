@@ -6,11 +6,14 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.ContactsContract;
 import android.provider.MediaStore;
+import android.text.InputType;
+import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
-import android.Manifest;
-import android.content.pm.PackageManager;
 
 import androidx.activity.EdgeToEdge;
 import androidx.activity.result.ActivityResultLauncher;
@@ -23,12 +26,16 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import java.io.File;
-import java.io.IOException;
 
 public class MainActivity extends AppCompatActivity {
 
     private Uri photoUri;
+    private Uri shareImageUri;
+    private String selectedPhoneNumber;
     private ImageView imageView;
+    private ImageView shareImagePreview;
+    private TextView selectedContactView;
+    private Button callSelectedContactButton;
 
     private final ActivityResultLauncher<Intent> cameraLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
@@ -47,22 +54,12 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-    private final ActivityResultLauncher<String> contactsPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
-                if (granted) {
-                    openContactPicker();
-                }
-            });
-
     private final ActivityResultLauncher<Intent> contactPickerLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                     Uri contactUri = result.getData().getData();
                     if (contactUri != null) {
-                        String phoneNumber = getPhoneNumberFromContact(contactUri);
-                        if (phoneNumber != null) {
-                            placeCall(phoneNumber);
-                        }
+                        showSelectedContact(contactUri);
                     }
                 }
             });
@@ -70,52 +67,29 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<Intent> shareImageLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                    Uri selectedImageUri = result.getData().getData();
-                    try {
-                        String mimeType = getContentResolver().getType(selectedImageUri);
-                        if (mimeType == null) mimeType = "image/jpeg";
-
-                        android.content.ContentValues values = new android.content.ContentValues();
-                        values.put(MediaStore.Images.Media.DISPLAY_NAME, "shared_image_" + System.currentTimeMillis() + ".jpg");
-                        values.put(MediaStore.Images.Media.MIME_TYPE, mimeType);
-                        Uri mediaUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-
-                        try (java.io.InputStream in = getContentResolver().openInputStream(selectedImageUri);
-                             java.io.OutputStream out = getContentResolver().openOutputStream(mediaUri)) {
-                            byte[] buffer = new byte[4096];
-                            int read;
-                            while ((read = in.read(buffer)) != -1) {
-                                out.write(buffer, 0, read);
-                            }
-                        }
-
-                        Intent sendIntent = new Intent(Intent.ACTION_SEND);
-                        sendIntent.putExtra(Intent.EXTRA_TEXT, "Check out this awesome app!");
-                        sendIntent.putExtra(Intent.EXTRA_STREAM, mediaUri);
-                        sendIntent.setType(mimeType);
-                        sendIntent.setClipData(android.content.ClipData.newUri(getContentResolver(), "", mediaUri));
-                        sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-                        Intent chooserIntent = Intent.createChooser(sendIntent, "Share via");
-                        chooserIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        startActivity(chooserIntent);
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                    shareImageUri = result.getData().getData();
+                    if (shareImageUri != null && shareImagePreview != null) {
+                        shareImagePreview.setImageURI(shareImageUri);
+                        shareImagePreview.setVisibility(View.VISIBLE);
                     }
                 }
             });
 
-    private String getPhoneNumberFromContact(Uri phoneUri) {
-        String phoneNumber = null;
-        String[] projection = {ContactsContract.CommonDataKinds.Phone.NUMBER};
+    private void showSelectedContact(Uri phoneUri) {
+        String[] projection = {
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+        };
         Cursor cursor = getContentResolver().query(phoneUri, projection, null, null, null);
         if (cursor != null) {
             if (cursor.moveToFirst()) {
-                phoneNumber = cursor.getString(0);
+                String name = cursor.getString(0);
+                selectedPhoneNumber = cursor.getString(1);
+                selectedContactView.setText(getString(R.string.selected_contact, name, selectedPhoneNumber));
+                callSelectedContactButton.setVisibility(View.VISIBLE);
             }
             cursor.close();
         }
-        return phoneNumber;
     }
 
     private void openContactPicker() {
@@ -141,38 +115,11 @@ public class MainActivity extends AppCompatActivity {
         });
 
         imageView = findViewById(R.id.imageView);
+        selectedContactView = findViewById(R.id.selectedContact);
+        callSelectedContactButton = findViewById(R.id.buttonCallSelectedContact);
 
         Button btnShareTextImage = findViewById(R.id.buttonShareTextImage);
-        btnShareTextImage.setOnClickListener(v -> {
-            String[] options = {"Share Text", "Share Image"};
-            new android.app.AlertDialog.Builder(this)
-                    .setTitle("Choose share type")
-                    .setItems(options, (dialog, which) -> {
-                        if (which == 0) {
-                            android.widget.EditText input = new android.widget.EditText(this);
-                            input.setHint("Enter text to share");
-                            new android.app.AlertDialog.Builder(this)
-                                    .setTitle("Share Text")
-                                    .setView(input)
-                                    .setPositiveButton("Share", (d, w) -> {
-                                        String textToShare = input.getText().toString();
-                                        if (!textToShare.isEmpty()) {
-                                            Intent sendIntent = new Intent(Intent.ACTION_SEND);
-                                            sendIntent.putExtra(Intent.EXTRA_TEXT, textToShare);
-                                            sendIntent.setType("text/plain");
-                                            startActivity(Intent.createChooser(sendIntent, "Share via"));
-                                        }
-                                    })
-                                    .setNegativeButton("Cancel", null)
-                                    .show();
-                        } else {
-                            Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
-                            galleryIntent.setType("image/*");
-                            shareImageLauncher.launch(galleryIntent);
-                        }
-                    })
-                    .show();
-        });
+        btnShareTextImage.setOnClickListener(v -> showShareDialog());
 
         Button btnTakePhoto = findViewById(R.id.button2);
         btnTakePhoto.setOnClickListener(v -> {
@@ -185,11 +132,11 @@ public class MainActivity extends AppCompatActivity {
         });
 
         Button btnDialPad = findViewById(R.id.button3);
-        btnDialPad.setOnClickListener(v -> {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
-                openContactPicker();
-            } else {
-                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS);
+        btnDialPad.setOnClickListener(v -> openContactPicker());
+
+        callSelectedContactButton.setOnClickListener(v -> {
+            if (selectedPhoneNumber != null) {
+                placeCall(selectedPhoneNumber);
             }
         });
 
@@ -199,5 +146,66 @@ public class MainActivity extends AppCompatActivity {
             galleryIntent.setType("image/*");
             galleryLauncher.launch(galleryIntent);
         });
+    }
+
+    private void showShareDialog() {
+        shareImageUri = null;
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int) (16 * getResources().getDisplayMetrics().density);
+        content.setPadding(padding, 0, padding, 0);
+
+        EditText textInput = new EditText(this);
+        textInput.setHint(R.string.share_text_hint);
+        textInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        content.addView(textInput);
+
+        Button attachImageButton = new Button(this);
+        attachImageButton.setText(R.string.attach_image);
+        content.addView(attachImageButton);
+
+        shareImagePreview = new ImageView(this);
+        shareImagePreview.setAdjustViewBounds(true);
+        shareImagePreview.setMaxHeight((int) (180 * getResources().getDisplayMetrics().density));
+        shareImagePreview.setVisibility(View.GONE);
+        content.addView(shareImagePreview);
+
+        attachImageButton.setOnClickListener(v -> {
+            Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
+            galleryIntent.setType("image/*");
+            galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+            shareImageLauncher.launch(galleryIntent);
+        });
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.share_text_image)
+                .setView(content)
+                .setPositiveButton(R.string.share, (dialog, which) -> shareContent(textInput.getText().toString()))
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void shareContent(String text) {
+        if (text.trim().isEmpty() && shareImageUri == null) {
+            return;
+        }
+
+        Intent sendIntent = new Intent(Intent.ACTION_SEND);
+        sendIntent.putExtra(Intent.EXTRA_TEXT, text);
+        if (shareImageUri != null) {
+            sendIntent.putExtra(Intent.EXTRA_STREAM, shareImageUri);
+            sendIntent.setType("image/*");
+            sendIntent.setClipData(android.content.ClipData.newUri(getContentResolver(), "image", shareImageUri));
+            sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            sendIntent.setType("text/plain");
+        }
+
+        Intent chooser = Intent.createChooser(sendIntent, getString(R.string.share_via));
+        Intent gmailIntent = new Intent(sendIntent).setPackage("com.google.android.gm");
+        if (gmailIntent.resolveActivity(getPackageManager()) != null) {
+            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{gmailIntent});
+        }
+        startActivity(chooser);
     }
 }
